@@ -1,103 +1,138 @@
-import Image from "next/image";
+"use client";
+import dynamic from "next/dynamic";
+import { useState, useEffect } from "react";
+import CodeEditor from "@/components/CodeEditor";
+import { buildFileTree, FileNode } from "@/lib/fileTree";
+import FileExplorer from "@/components/FileExplorer";
+import PreviewFrame from "@/components/PreviewFrame";
+import { generateHTML } from "@/lib/renderHTML";
+import PromptChatThread from "@/components/PromptChatThread";
+import { getGeminiResponse } from "@/lib/gemini";
+import { parseLLMResponseToFiles } from "@/lib/parser";
 
-export default function Home() {
+
+const PromptChatInput = dynamic(() => import("../components/PromptChatInput"), {
+  ssr: false,
+});
+
+// 🧠 Dummy file list
+const dummyFiles = [
+  {
+    path: "app/page.tsx",
+    content: `export default function Page() {
+      return (<div>Hello from Preview Frame</div>);
+    }`,
+  },
+  {
+    path: "components/Button.tsx",
+    content: "export const Button = () => <button>Click</button>;",
+  },
+];
+
+// 🧠 Detect language from file extension
+function getLanguageFromPath(path: string): string {
+  if (path.endsWith(".tsx") || path.endsWith(".ts")) return "typescript";
+  if (path.endsWith(".js")) return "javascript";
+  if (path.endsWith(".css")) return "css";
+  if (path.endsWith(".html")) return "html";
+  if (path.endsWith(".json")) return "json";
+  return "plaintext";
+}
+
+export default function HomePage() {
+  const [files, setFiles] = useState(dummyFiles);
+  const [selected, setSelected] = useState<FileNode | null>(null);
+  const [html, setHtml] = useState(generateHTML(files));
+  const tree = buildFileTree(files);
+  const [chats, setChats] = useState<{ text: string; response?: string }[]>([]);
+
+
+  // 🧠 Manual regenerate button
+  const handleRegenerate = () => {
+    setHtml(generateHTML(files));
+  };
+
+  // 🧠 Auto update preview after file edit (debounced)
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setHtml(generateHTML(files));
+    }, 800);
+    return () => clearTimeout(timeout);
+  }, [files]);
+
+  // 🧠 When code changes, update the correct file
+  const handleCodeChange = (newCode: string | undefined) => {
+    if (!selected || !newCode) return;
+
+    const updatedFiles = files.map((f) =>
+      f.path === selected.path ? { ...f, content: newCode } : f
+    );
+
+    setFiles(updatedFiles);
+  };
+
+
+
+  // chat
+  const handlePromptSend = async (text: string) => {
+  setChats((prev) => [...prev, { text }]);
+
+  const response = await getGeminiResponse(text);
+
+  setChats((prev) =>
+    prev.map((chat, idx) =>
+      idx === prev.length - 1 ? { ...chat, response } : chat
+    )
+  );
+
+  const generatedFiles = parseLLMResponseToFiles(response);
+  setFiles((prev) => [...prev, ...generatedFiles]);
+  };
+
+  
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+    <>
+      {/* Chat UI */}
+      <PromptChatInput onSend={handlePromptSend} />
+      <PromptChatThread chats={chats} />
+  
+      <div className="flex h-screen">
+        {/* Sidebar: File explorer */}
+        <div className="w-64">
+          <FileExplorer tree={tree} onFileSelect={setSelected} />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+  
+        {/* Main Area */}
+        <div className="flex-1 grid grid-cols-2 gap-2 p-2">
+          {/* Code Editor panel */}
+          <div className="bg-zinc-100 p-2 rounded shadow h-screen">
+            <button
+              onClick={handleRegenerate}
+              className="text-xs bg-black text-white px-3 py-1 rounded mb-2"
+            >
+              Regenerate Preview
+            </button>
+  
+            <h2 className="text-sm font-semibold mb-1">{selected?.name}</h2>
+  
+            {selected ? (
+              <CodeEditor
+                code={files.find((f) => f.path === selected.path)?.content || ""}
+                onChange={handleCodeChange}
+                language={getLanguageFromPath(selected.path)}
+              />
+            ) : (
+              <p className="text-xs">Click a file to edit it.</p>
+            )}
+          </div>
+  
+          {/* Preview Frame */}
+          <div className="bg-white border rounded overflow-hidden">
+            <PreviewFrame html={html} />
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
